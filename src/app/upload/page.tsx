@@ -13,6 +13,7 @@ import {
   Loader2,
   BookOpen,
   GraduationCap,
+  Sparkles,
 } from 'lucide-react';
 
 interface FileWithPreview extends File {
@@ -97,6 +98,19 @@ export default function UploadPage() {
 
   const canProceed = files.exam !== null;
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+    });
+  };
+
   const handleSubmit = async () => {
     if (!files.exam || !settings.school_name || !settings.exam_name) {
       alert('필수 항목을 입력해주세요.');
@@ -111,25 +125,56 @@ export default function UploadPage() {
     setIsUploading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('exam', files.exam);
-      files.mock.forEach((f) => formData.append('mock', f));
-      files.textbook.forEach((f) => formData.append('textbook', f));
-      formData.append('settings', JSON.stringify(settings));
+      const reportId = crypto.randomUUID();
 
-      const response = await fetch('/api/upload', {
+      const examBase64 = await fileToBase64(files.exam);
+
+      const sources: Array<{ name: string; base64: string }> = [];
+      
+      for (let i = 0; i < files.mock.length; i++) {
+        const base64 = await fileToBase64(files.mock[i]);
+        sources.push({
+          name: files.mock[i].name.replace('.pdf', ''),
+          base64,
+        });
+      }
+
+      for (let i = 0; i < files.textbook.length; i++) {
+        const base64 = await fileToBase64(files.textbook[i]);
+        sources.push({
+          name: files.textbook[i].name.replace('.pdf', ''),
+          base64,
+        });
+      }
+
+      const response = await fetch(`/api/analyze/${reportId}`, {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'start_matching',
+          examBase64,
+          sources,
+          vocabularyLevel: settings.vocabulary_level,
+          metadata: {
+            school_name: settings.school_name,
+            grade: settings.grade,
+            exam_name: settings.exam_name,
+            student_password: settings.student_password,
+            edit_password: settings.edit_password,
+            vocabulary_level: settings.vocabulary_level,
+          },
+        }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        router.push(`/analyze/${data.data.report_id}`);
+        router.push(`/match/${reportId}`);
       } else {
-        alert(data.error || '업로드에 실패했습니다.');
+        alert(data.error || '분석 시작에 실패했습니다.');
       }
-    } catch {
+    } catch (err) {
+      console.error('Upload error:', err);
       alert('업로드 중 오류가 발생했습니다.');
     } finally {
       setIsUploading(false);
@@ -137,69 +182,69 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b bg-white sticky top-0 z-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <header className="border-b bg-white/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-4">
-          <Link href="/" className="text-slate-500 hover:text-slate-900 transition-colors">
+          <Link href="/" className="text-slate-400 hover:text-slate-900 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <div className="flex items-center gap-2">
-            <Upload className="w-6 h-6 text-blue-600" />
-            <span className="text-lg font-semibold text-slate-900">새 분석 시작</span>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <Upload className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-lg font-bold text-slate-900">새 분석</span>
           </div>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10">
         <div className="flex items-center justify-center gap-4 mb-10">
-          <StepIndicator
-            step={1}
-            label="PDF 업로드"
-            active={step === 'files'}
-            completed={step === 'settings'}
-          />
+          <StepIndicator step={1} label="파일 업로드" active={step === 'files'} completed={step === 'settings'} />
           <div className="w-16 h-0.5 bg-slate-200" />
           <StepIndicator step={2} label="설정" active={step === 'settings'} completed={false} />
         </div>
 
         {step === 'files' && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             <DropzoneSection
               title="기출문제 PDF"
-              description="내신 기출문제 스캔본 (필수)"
+              description="내신 기출문제 스캔본"
               icon={<FileText className="w-6 h-6" />}
               required
               dropzone={examDropzone}
               files={files.exam ? [files.exam] : []}
               onRemove={() => removeFile('exam')}
               maxFiles={1}
+              gradient="from-blue-500 to-purple-500"
             />
 
             <DropzoneSection
               title="모의고사 PDF"
-              description="시험 범위에 해당하는 모의고사 (최대 2개)"
+              description="시험 범위 모의고사 (최대 2개)"
               icon={<GraduationCap className="w-6 h-6" />}
               dropzone={mockDropzone}
               files={files.mock}
               onRemove={(i) => removeFile('mock', i)}
               maxFiles={2}
+              gradient="from-amber-500 to-orange-500"
             />
 
             <DropzoneSection
               title="교과서 PDF"
-              description="시험 범위에 해당하는 교과서 (최대 2개)"
+              description="시험 범위 교과서 (최대 2개)"
               icon={<BookOpen className="w-6 h-6" />}
               dropzone={textbookDropzone}
               files={files.textbook}
               onRemove={(i) => removeFile('textbook', i)}
               maxFiles={2}
+              gradient="from-green-500 to-teal-500"
             />
 
             <div className="flex justify-end pt-4">
               <button
                 onClick={() => setStep('settings')}
                 disabled={!canProceed}
-                className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-blue-500 hover:to-purple-500 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/25 disabled:shadow-none"
               >
                 다음 단계
                 <ArrowRight className="w-4 h-4" />
@@ -209,30 +254,24 @@ export default function UploadPage() {
         )}
 
         {step === 'settings' && (
-          <div className="bg-white rounded-2xl border p-8">
-            <h2 className="text-xl font-semibold text-slate-900 mb-6">분석 설정</h2>
+          <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-900 mb-6">분석 설정</h2>
 
             <div className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    학교명 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.school_name}
-                    onChange={(e) => setSettings({ ...settings, school_name: e.target.value })}
-                    placeholder="예: 백영고등학교"
-                    className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                </div>
-
+                <InputField
+                  label="학교명"
+                  required
+                  value={settings.school_name}
+                  onChange={(e) => setSettings({ ...settings, school_name: e.target.value })}
+                  placeholder="예: 백영고등학교"
+                />
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">학년</label>
                   <select
                     value={settings.grade}
                     onChange={(e) => setSettings({ ...settings, grade: e.target.value })}
-                    className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 bg-white"
                   >
                     <option value="고1">고1</option>
                     <option value="고2">고2</option>
@@ -241,63 +280,47 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  시험명 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={settings.exam_name}
-                  onChange={(e) => setSettings({ ...settings, exam_name: e.target.value })}
-                  placeholder="예: 2024학년도 1학기 중간고사"
-                  className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              <InputField
+                label="시험명"
+                required
+                value={settings.exam_name}
+                onChange={(e) => setSettings({ ...settings, exam_name: e.target.value })}
+                placeholder="예: 2024학년도 1학기 중간고사"
+              />
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <InputField
+                  label="학생용 비밀번호"
+                  required
+                  type="password"
+                  value={settings.student_password}
+                  onChange={(e) => setSettings({ ...settings, student_password: e.target.value })}
+                  placeholder="학생 공유용"
+                />
+                <InputField
+                  label="편집용 비밀번호"
+                  required
+                  type="password"
+                  value={settings.edit_password}
+                  onChange={(e) => setSettings({ ...settings, edit_password: e.target.value })}
+                  placeholder="선생님 전용"
                 />
               </div>
 
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    학생용 비밀번호 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    value={settings.student_password}
-                    onChange={(e) => setSettings({ ...settings, student_password: e.target.value })}
-                    placeholder="학생들에게 공유할 비밀번호"
-                    className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    편집용 비밀번호 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    value={settings.edit_password}
-                    onChange={(e) => setSettings({ ...settings, edit_password: e.target.value })}
-                    placeholder="선생님 전용 편집 비밀번호"
-                    className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  어휘 난이도 기준
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-3">어휘 난이도</label>
                 <div className="grid grid-cols-3 gap-3">
                   {(['teps_830', 'teps_850', 'teps_870'] as const).map((level) => (
                     <button
                       key={level}
                       onClick={() => setSettings({ ...settings, vocabulary_level: level })}
-                      className={`p-4 rounded-lg border-2 transition-colors ${
+                      className={`p-4 rounded-xl border-2 transition-all ${
                         settings.vocabulary_level === level
-                          ? 'border-blue-600 bg-blue-50'
-                          : 'border-slate-200 hover:border-slate-300'
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
-                      <div className="font-medium text-slate-900">
+                      <div className="font-semibold text-slate-900">
                         {level === 'teps_830' && 'TEPS 830+'}
                         {level === 'teps_850' && 'TEPS 850+'}
                         {level === 'teps_870' && 'TEPS 870+'}
@@ -312,27 +335,20 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-4">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.use_pro_model}
-                    onChange={(e) => setSettings({ ...settings, use_pro_model: e.target.checked })}
-                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <div>
-                    <div className="font-medium text-slate-900">
-                      Gemini 3 Pro 사용 (고품질 분석)
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      매칭 정확도가 높아집니다. 권장 옵션입니다.
-                    </div>
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 border border-blue-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                    <Sparkles className="w-5 h-5 text-white" />
                   </div>
-                </label>
+                  <div>
+                    <div className="font-semibold text-slate-900">Antigravity Gemini 3 Pro</div>
+                    <div className="text-sm text-slate-500">최고 정확도 분석 모델</div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-between pt-8 mt-8 border-t">
+            <div className="flex justify-between pt-8 mt-8 border-t border-slate-100">
               <button
                 onClick={() => setStep('files')}
                 className="flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
@@ -344,12 +360,12 @@ export default function UploadPage() {
               <button
                 onClick={handleSubmit}
                 disabled={isUploading || !settings.school_name || !settings.exam_name}
-                className="flex items-center gap-2 bg-blue-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-3 rounded-xl font-semibold hover:from-blue-500 hover:to-purple-500 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/25 disabled:shadow-none"
               >
                 {isUploading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    업로드 중...
+                    분석 중...
                   </>
                 ) : (
                   <>
@@ -366,23 +382,13 @@ export default function UploadPage() {
   );
 }
 
-function StepIndicator({
-  step,
-  label,
-  active,
-  completed,
-}: {
-  step: number;
-  label: string;
-  active: boolean;
-  completed: boolean;
-}) {
+function StepIndicator({ step, label, active, completed }: { step: number; label: string; active: boolean; completed: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+        className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${
           active
-            ? 'bg-blue-600 text-white'
+            ? 'bg-gradient-to-br from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/25'
             : completed
             ? 'bg-green-500 text-white'
             : 'bg-slate-200 text-slate-500'
@@ -390,9 +396,41 @@ function StepIndicator({
       >
         {step}
       </div>
-      <span className={`text-sm ${active ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>
+      <span className={`text-sm ${active ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>
         {label}
       </span>
+    </div>
+  );
+}
+
+function InputField({
+  label,
+  required = false,
+  type = 'text',
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  required?: boolean;
+  type?: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-2">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 bg-white"
+      />
     </div>
   );
 }
@@ -406,6 +444,7 @@ function DropzoneSection({
   files,
   onRemove,
   maxFiles,
+  gradient,
 }: {
   title: string;
   description: string;
@@ -415,13 +454,16 @@ function DropzoneSection({
   files: File[];
   onRemove: (index?: number) => void;
   maxFiles: number;
+  gradient: string;
 }) {
   const { getRootProps, getInputProps, isDragActive } = dropzone;
 
   return (
-    <div className="bg-white rounded-2xl border p-6">
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
       <div className="flex items-center gap-3 mb-4">
-        <div className="text-blue-600">{icon}</div>
+        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white`}>
+          {icon}
+        </div>
         <div>
           <h3 className="font-semibold text-slate-900">
             {title}
@@ -434,16 +476,16 @@ function DropzoneSection({
       {files.length < maxFiles && (
         <div
           {...getRootProps()}
-          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
             isDragActive
               ? 'border-blue-500 bg-blue-50'
-              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
           }`}
         >
           <input {...getInputProps()} />
           <Upload className="w-8 h-8 text-slate-400 mx-auto mb-3" />
           <p className="text-slate-600">
-            {isDragActive ? '여기에 놓으세요' : '클릭하거나 파일을 드래그하세요'}
+            {isDragActive ? '여기에 놓으세요' : '클릭하거나 드래그하세요'}
           </p>
           <p className="text-sm text-slate-400 mt-1">PDF 파일만 가능</p>
         </div>
@@ -454,7 +496,7 @@ function DropzoneSection({
           {files.map((file, index) => (
             <div
               key={index}
-              className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-3"
+              className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3"
             >
               <div className="flex items-center gap-3">
                 <FileText className="w-5 h-5 text-blue-600" />

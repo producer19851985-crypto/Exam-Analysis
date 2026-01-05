@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -12,13 +12,40 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-interface AnalysisStep {
+interface AnalysisStatus {
+  status: 'processing' | 'completed' | 'error';
+  step: string;
+  progress: number;
+  result?: {
+    questions: Array<{
+      questionNumber: number;
+      sourceType: string;
+      sourceName: string;
+      confidence: number;
+      questionType: string;
+      difficulty: string;
+      vocabularyChanges: Array<{
+        original: string;
+        transformed: string;
+        tepsLevel: number;
+      }>;
+    }>;
+    summary: {
+      total: number;
+      direct: number;
+      indirect: number;
+      external: number;
+      overallDifficulty: string;
+    };
+  };
+  error?: string;
+}
+
+interface Step {
   id: string;
   label: string;
-  description: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   progress?: number;
-  details?: string[];
 }
 
 export default function AnalyzePage() {
@@ -26,111 +53,79 @@ export default function AnalyzePage() {
   const router = useRouter();
   const reportId = params.id as string;
 
-  const [steps, setSteps] = useState<AnalysisStep[]>([
-    {
-      id: 'ocr',
-      label: 'PDF 텍스트 추출',
-      description: '기출문제와 원문에서 텍스트를 추출합니다.',
-      status: 'processing',
-      progress: 0,
-      details: [],
-    },
-    {
-      id: 'matching',
-      label: '원문 매칭',
-      description: 'Gemini 3 Pro로 기출문제와 원문을 매칭합니다.',
-      status: 'pending',
-    },
-    {
-      id: 'analyzing',
-      label: '변형 분석',
-      description: '어휘 변형, 구조 변형, 난이도를 분석합니다.',
-      status: 'pending',
-    },
-    {
-      id: 'generating',
-      label: '리포트 생성',
-      description: '통합 보고서와 문항별 분석을 생성합니다.',
-      status: 'pending',
-    },
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Step[]>([
+    { id: 'OCR', label: 'PDF 텍스트 추출', status: 'processing', progress: 0 },
+    { id: '매칭', label: '원문 매칭 (Gemini 3 Pro)', status: 'pending' },
+    { id: '분석', label: '변형 분석', status: 'pending' },
+    { id: '완료', label: '리포트 생성', status: 'pending' },
   ]);
 
-  const [overallProgress, setOverallProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState(900);
-  const [error, setError] = useState<string | null>(null);
+  const fetchStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/analyze/${reportId}`);
+      const data = await response.json();
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSteps((prev) => {
-        const newSteps = [...prev];
-        const currentStepIndex = newSteps.findIndex((s) => s.status === 'processing');
+      if (data.success && data.data) {
+        setAnalysisStatus(data.data);
 
-        if (currentStepIndex === -1) return prev;
+        setSteps((prev) =>
+          prev.map((step) => {
+            if (step.id === data.data.step) {
+              return { ...step, status: 'processing', progress: data.data.progress };
+            } else if (
+              prev.findIndex((s) => s.id === step.id) <
+              prev.findIndex((s) => s.id === data.data.step)
+            ) {
+              return { ...step, status: 'completed', progress: 100 };
+            } else if (data.data.status === 'completed') {
+              return { ...step, status: 'completed', progress: 100 };
+            }
+            return step;
+          })
+        );
 
-        const currentStep = newSteps[currentStepIndex];
-        const newProgress = (currentStep.progress || 0) + Math.random() * 15;
-
-        if (newProgress >= 100) {
-          currentStep.status = 'completed';
-          currentStep.progress = 100;
-
-          if (currentStepIndex < newSteps.length - 1) {
-            newSteps[currentStepIndex + 1].status = 'processing';
-            newSteps[currentStepIndex + 1].progress = 0;
-          } else {
-            setTimeout(() => {
-              router.push(`/report/${reportId}`);
-            }, 1000);
-          }
-        } else {
-          currentStep.progress = newProgress;
-
-          if (currentStep.id === 'ocr') {
-            currentStep.details = [
-              '✓ 기출문제 OCR 완료 (30문항 인식)',
-              newProgress > 30 ? '✓ 2024년 3월 모의고사 추출 완료' : '🔄 2024년 3월 모의고사 추출 중...',
-              newProgress > 60 ? '✓ 2023년 11월 모의고사 추출 완료' : '',
-              newProgress > 80 ? '✓ 교과서 Lesson 3 추출 완료' : '',
-            ].filter(Boolean);
-          } else if (currentStep.id === 'matching') {
-            const matchedCount = Math.floor(newProgress / 3.33);
-            currentStep.details = [
-              `✓ 1-10번 문제 매칭 완료`,
-              matchedCount > 10 ? '✓ 11-20번 문제 매칭 완료' : `🔄 ${Math.min(matchedCount, 20)}번 문제 매칭 중...`,
-              matchedCount > 20 ? '✓ 21-30번 문제 매칭 완료' : '',
-            ].filter(Boolean);
-          } else if (currentStep.id === 'analyzing') {
-            currentStep.details = [
-              newProgress > 20 ? '✓ 어휘 변형 분석 완료' : '🔄 어휘 변형 분석 중...',
-              newProgress > 50 ? '✓ 문장 구조 분석 완료' : '',
-              newProgress > 80 ? '✓ 난이도 평가 완료' : '',
-            ].filter(Boolean);
-          }
+        if (data.data.status === 'completed' && data.data.result) {
+          setTimeout(() => {
+            router.push(`/report/${reportId}`);
+          }, 1500);
         }
 
-        return newSteps;
-      });
+        if (data.data.status === 'error') {
+          setError(data.data.error || '분석 중 오류가 발생했습니다.');
+        }
+      }
+    } catch (err) {
+      console.error('Fetch status error:', err);
+    }
+  }, [reportId, router]);
 
-      setOverallProgress((prev) => {
-        const completedSteps = steps.filter((s) => s.status === 'completed').length;
-        const currentStep = steps.find((s) => s.status === 'processing');
-        const currentProgress = currentStep?.progress || 0;
-        return Math.min(100, (completedSteps * 25) + (currentProgress / 4));
-      });
+  useEffect(() => {
+    let isMounted = true;
+    
+    const pollStatus = async () => {
+      if (!isMounted) return;
+      await fetchStatus();
+    };
+    
+    pollStatus();
+    const interval = setInterval(pollStatus, 2000);
+    
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [fetchStatus]);
 
-      setEstimatedTime((prev) => Math.max(0, prev - 1));
-    }, 1000);
+  const isCompleted = analysisStatus?.status === 'completed';
+  const hasError = analysisStatus?.status === 'error';
 
-    return () => clearInterval(interval);
-  }, [reportId, router, steps]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}분 ${secs}초`;
-  };
-
-  const isCompleted = steps.every((s) => s.status === 'completed');
+  const overallProgress = steps.reduce((acc, step) => {
+    if (step.status === 'completed') return acc + 25;
+    if (step.status === 'processing') return acc + ((step.progress || 0) / 4);
+    return acc;
+  }, 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -140,9 +135,15 @@ export default function AnalyzePage() {
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div className="flex items-center gap-2">
-            <Loader2 className={`w-6 h-6 text-blue-600 ${!isCompleted ? 'animate-spin' : ''}`} />
+            {isCompleted ? (
+              <CheckCircle2 className="w-6 h-6 text-green-600" />
+            ) : hasError ? (
+              <AlertCircle className="w-6 h-6 text-red-600" />
+            ) : (
+              <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+            )}
             <span className="text-lg font-semibold text-slate-900">
-              {isCompleted ? '분석 완료!' : '분석 진행 중...'}
+              {isCompleted ? '분석 완료!' : hasError ? '분석 오류' : '분석 진행 중...'}
             </span>
           </div>
         </div>
@@ -153,12 +154,12 @@ export default function AnalyzePage() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">분석 진행 상황</h1>
-              <p className="text-slate-500 mt-1">리포트 ID: {reportId}</p>
+              <p className="text-slate-500 mt-1">리포트 ID: {reportId.slice(0, 8)}...</p>
             </div>
-            {!isCompleted && (
+            {!isCompleted && !hasError && (
               <div className="text-right">
-                <p className="text-sm text-slate-500">예상 남은 시간</p>
-                <p className="text-2xl font-bold text-blue-600">{formatTime(estimatedTime)}</p>
+                <p className="text-sm text-slate-500">현재 단계</p>
+                <p className="text-lg font-bold text-blue-600">{analysisStatus?.step || 'OCR'}</p>
               </div>
             )}
           </div>
@@ -170,7 +171,13 @@ export default function AnalyzePage() {
             </div>
             <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-500"
+                className={`h-full rounded-full transition-all duration-500 ${
+                  hasError
+                    ? 'bg-red-500'
+                    : isCompleted
+                    ? 'bg-green-500'
+                    : 'bg-gradient-to-r from-blue-500 to-blue-600'
+                }`}
                 style={{ width: `${overallProgress}%` }}
               />
             </div>
@@ -205,19 +212,21 @@ export default function AnalyzePage() {
           </div>
         )}
 
-        <div className="bg-slate-100 rounded-xl p-6 mt-8">
-          <p className="text-sm text-slate-600 text-center">
-            분석이 완료되면 자동으로 리포트 페이지로 이동합니다.
-            <br />
-            창을 닫아도 분석은 계속 진행됩니다.
-          </p>
-        </div>
+        {!isCompleted && !hasError && (
+          <div className="bg-slate-100 rounded-xl p-6 mt-8">
+            <p className="text-sm text-slate-600 text-center">
+              Gemini 3 Pro가 기출문제와 원문을 분석하고 있습니다.
+              <br />
+              약 2-5분 정도 소요됩니다. 창을 닫아도 분석은 계속 진행됩니다.
+            </p>
+          </div>
+        )}
       </main>
     </div>
   );
 }
 
-function StepCard({ step, index }: { step: AnalysisStep; index: number }) {
+function StepCard({ step, index }: { step: Step; index: number }) {
   const getIcon = () => {
     switch (step.status) {
       case 'completed':
@@ -260,13 +269,6 @@ function StepCard({ step, index }: { step: AnalysisStep; index: number }) {
               </span>
             )}
           </div>
-          <p
-            className={`text-sm mt-1 ${
-              step.status === 'pending' ? 'text-slate-400' : 'text-slate-600'
-            }`}
-          >
-            {step.description}
-          </p>
 
           {step.status === 'processing' && step.progress !== undefined && (
             <div className="mt-3">
@@ -276,16 +278,6 @@ function StepCard({ step, index }: { step: AnalysisStep; index: number }) {
                   style={{ width: `${step.progress}%` }}
                 />
               </div>
-            </div>
-          )}
-
-          {step.details && step.details.length > 0 && (
-            <div className="mt-3 space-y-1">
-              {step.details.map((detail, i) => (
-                <p key={i} className="text-sm text-slate-600">
-                  {detail}
-                </p>
-              ))}
             </div>
           )}
         </div>
