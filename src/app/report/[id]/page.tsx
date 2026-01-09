@@ -282,7 +282,7 @@ export default function ReportPage() {
 
   const copyShareInfo = () => {
     if (!reportMetadata) return;
-    const url = `https://exam-analyzer-rho.vercel.app/report/${id}`;
+    const url = `https://exam-analyzer-rho.vercel.app/report/${reportId}`;
     const text = `${reportMetadata.school_name} ${reportMetadata.exam_name} 분석 리포트\n\n링크: ${url}\n비밀번호: ${reportMetadata.student_password}`;
     copyToClipboard(text, 'share');
   };
