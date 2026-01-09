@@ -10,17 +10,17 @@ const safetySettings = [
 ];
 
 export const geminiFlash = genAI.getGenerativeModel({
-  model: 'gemini-2.0-flash',
+  model: 'gemini-2.5-flash',
   safetySettings,
 });
 
 export const geminiPro = genAI.getGenerativeModel({
-  model: 'gemini-2.5-pro-preview-06-05',
+  model: 'gemini-2.5-pro',
   safetySettings,
 });
 
 export const geminiFlashVision = genAI.getGenerativeModel({
-  model: 'gemini-2.0-flash',
+  model: 'gemini-2.5-flash',
   safetySettings,
 });
 
@@ -329,6 +329,61 @@ JSON만 반환해주세요.`;
   }
 
   return JSON.parse(jsonMatch[0]);
+}
+
+export interface VocabDetail {
+  word: string;
+  meaning: string;
+  pronunciation: string;
+  etymology: string;
+}
+
+export async function generateVocabDetails(words: string[]): Promise<VocabDetail[]> {
+  if (words.length === 0) return [];
+
+  const prompt = `영어 단어 및 숙어 목록에 대해 한국어로 뜻, IPA 발음기호, 간단한 어원/어근 설명을 제공해주세요.
+
+## 단어/숙어 목록
+${words.join(', ')}
+
+## 출력 형식 (JSON 배열)
+[
+  {
+    "word": "implicit",
+    "meaning": "암묵적인, 함축된",
+    "pronunciation": "/ɪmˈplɪsɪt/",
+    "etymology": "im-(안에) + plic(접다) → 안에 접혀있는"
+  },
+  {
+    "word": "at a cost of",
+    "meaning": "~의 대가로, ~을 희생하고",
+    "pronunciation": "",
+    "etymology": "cost(대가) + of → ~의 대가로"
+  }
+]
+
+## 규칙
+1. meaning: 핵심 뜻 1-2개만 (한국어)
+2. pronunciation: 단어는 IPA 발음기호, 숙어는 빈 문자열
+3. etymology: 
+   - 단어: 접두사/어근/접미사 분해 + 의미 연결 (20자 이내)
+   - 숙어: 핵심 단어 의미 기반 설명 (20자 이내)
+   - 어원이 불분명하면 빈 문자열
+
+JSON 배열만 반환해주세요.`;
+
+  try {
+    const result = await geminiFlash.generateContent(prompt);
+    const responseText = result.response.text();
+    
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+
+    return JSON.parse(jsonMatch[0]);
+  } catch (error) {
+    console.error('[Gemini] Vocab details generation error:', error);
+    return [];
+  }
 }
 
 export async function generateSummaryReport(

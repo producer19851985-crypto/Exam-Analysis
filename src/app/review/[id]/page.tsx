@@ -17,6 +17,7 @@ import {
   RefreshCw,
   MessageSquare,
 } from 'lucide-react';
+import { formatSourceName } from '@/lib/utils';
 
 interface VocabularyChange {
   original: string;
@@ -41,16 +42,24 @@ interface GrammarPoint {
   explanation: string;
 }
 
+interface WrongAnswerAnalysis {
+  choice: string;
+  reason: string;
+}
+
 interface DetailedAnalysis {
   questionNumber: number;
+  questionText: string;
   sourceType: 'direct' | 'indirect' | 'external';
   sourceName: string;
+  sourceNumber?: number | null;
   questionType: string;
   originalType?: string;
   difficulty: 'high' | 'medium' | 'low';
   sentenceComparisons: SentenceComparison[];
   vocabularyChanges: VocabularyChange[];
   grammarPoints?: GrammarPoint[];
+  wrongAnswerAnalysis?: WrongAnswerAnalysis[];
   transformationSummary: string;
   teacherIntent: string;
   answerRationale: string;
@@ -76,7 +85,11 @@ export default function ReviewPage() {
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState('');
+  const [publishPasswords, setPublishPasswords] = useState({ student: '', edit: '' });
+  const [reanalyzingQuestion, setReanalyzingQuestion] = useState<number | null>(null);
+  const [editingField, setEditingField] = useState<{ questionNumber: number; field: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -103,6 +116,36 @@ export default function ReviewPage() {
     );
   };
 
+  const updateSourceType = async (questionNumber: number, sourceType: 'direct' | 'indirect' | 'external') => {
+    setEditedAnalysis(prev => 
+      prev.map(item => 
+        item.questionNumber === questionNumber 
+          ? { ...item, sourceType } 
+          : item
+      )
+    );
+    
+    await handleReanalyze(questionNumber, sourceType);
+  };
+
+  const updateAnalysisField = (questionNumber: number, field: string, value: string | string[]) => {
+    setEditedAnalysis(prev => 
+      prev.map(item => 
+        item.questionNumber === questionNumber 
+          ? { ...item, [field]: value } 
+          : item
+      )
+    );
+  };
+
+  const startEditing = (questionNumber: number, field: string) => {
+    setEditingField({ questionNumber, field });
+  };
+
+  const stopEditing = () => {
+    setEditingField(null);
+  };
+
   useEffect(() => {
     fetchData();
     const interval = setInterval(() => {
@@ -125,7 +168,50 @@ export default function ReviewPage() {
     });
   };
 
-  const handleApprove = async () => {
+  const handleReanalyze = async (questionNumber: number, sourceType?: 'direct' | 'indirect' | 'external') => {
+    setReanalyzingQuestion(questionNumber);
+    try {
+      const response = await fetch(`/api/analyze/${reportId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reanalyze_single', questionNumber, sourceType }),
+      });
+
+      const result = await response.json();
+      if (result.success && result.analysis) {
+        setEditedAnalysis(prev =>
+          prev.map(item =>
+            item.questionNumber === questionNumber
+              ? {
+                  ...item,
+                  ...result.analysis,
+                  wrongAnswerAnalysis: result.analysis.wrongAnswerAnalysis || [],
+                }
+              : item
+          )
+        );
+        alert(`${questionNumber}번 문항 재분석 완료!`);
+      } else {
+        alert(result.error || '재분석에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Failed to reanalyze:', error);
+      alert('재분석 중 오류가 발생했습니다.');
+    } finally {
+      setReanalyzingQuestion(null);
+    }
+  };
+
+  const handleApprove = () => {
+    setShowPublishModal(true);
+  };
+
+  const handlePublish = async () => {
+    if (!publishPasswords.student || !publishPasswords.edit) {
+      alert('비밀번호를 입력해주세요.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const response = await fetch(`/api/analyze/${reportId}`, {
@@ -147,12 +233,15 @@ export default function ReviewPage() {
         const publishResponse = await fetch(`/api/analyze/${reportId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'publish' }),
+          body: JSON.stringify({ 
+            action: 'publish',
+            student_password: publishPasswords.student,
+            edit_password: publishPasswords.edit,
+          }),
         });
 
         const publishResult = await publishResponse.json();
         if (publishResult.success) {
-
           router.push(`/report/${reportId}`);
         } else {
           alert(publishResult.error || '게시에 실패했습니다.');
@@ -165,6 +254,7 @@ export default function ReviewPage() {
       alert('오류가 발생했습니다.');
     } finally {
       setIsSubmitting(false);
+      setShowPublishModal(false);
     }
   };
 
@@ -198,10 +288,25 @@ export default function ReviewPage() {
     }
   };
 
+  const renderTextWithUnderline = (text: string) => {
+    const processed = text
+      .replace(/<u>/g, '**')
+      .replace(/<\/u>/g, '**');
+    
+    const parts = processed.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        const content = part.slice(2, -2);
+        return <u key={index} className="underline decoration-2">{content}</u>;
+      }
+      return <span key={index}>{part}</span>;
+    });
+  };
+
   if (!data) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        <Loader2 className="w-8 h-8 text-yellow-600 animate-spin" />
       </div>
     );
   }
@@ -220,7 +325,7 @@ export default function ReviewPage() {
 
         <main className="max-w-4xl mx-auto px-6 py-20">
           <div className="text-center">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/25">
+            <div className="w-20 h-20 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-yellow-500/25">
               <Loader2 className="w-10 h-10 text-white animate-spin" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 mb-2">{data.step}</h1>
@@ -229,11 +334,11 @@ export default function ReviewPage() {
             <div className="max-w-md mx-auto">
               <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-gradient-to-r from-blue-600 to-purple-600 transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-yellow-300 to-yellow-400 transition-all duration-500"
                   style={{ width: `${data.progress}%` }}
                 />
               </div>
-              <p className="text-sm text-slate-400 mt-2">{data.progress}% 완료</p>
+              <p className="text-sm text-slate-400 mt-2">{Math.round(data.progress)}% 완료</p>
             </div>
           </div>
         </main>
@@ -250,7 +355,7 @@ export default function ReviewPage() {
           <p className="text-slate-500 mb-6">{data.error}</p>
           <Link
             href={`/match/${reportId}`}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 bg-yellow-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-yellow-600 transition-colors"
           >
             매칭 검토로 돌아가기
           </Link>
@@ -294,7 +399,7 @@ export default function ReviewPage() {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-xl flex items-center justify-center">
                 <CheckCircle2 className="w-5 h-5 text-white" />
               </div>
               <span className="text-lg font-bold text-slate-900">분석 결과 검토</span>
@@ -323,8 +428,8 @@ export default function ReviewPage() {
           </div>
         )}
 
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <p className="text-blue-800 text-sm">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+          <p className="text-yellow-800 text-sm">
             AI가 생성한 상세 분석 결과입니다. 내용을 검토하고 <strong>승인</strong> 또는 <strong>반려</strong>해주세요.
             승인하면 바로 게시되어 학생들이 열람할 수 있습니다.
           </p>
@@ -336,9 +441,9 @@ export default function ReviewPage() {
               key={item.questionNumber}
               className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm"
             >
-              <button
+              <div
                 onClick={() => toggleQuestion(item.questionNumber)}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-lg font-bold text-slate-900">#{item.questionNumber}</span>
@@ -348,6 +453,17 @@ export default function ReviewPage() {
                   <span className="text-sm text-slate-500">{item.questionType}</span>
                 </div>
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReanalyze(item.questionNumber);
+                    }}
+                    disabled={reanalyzingQuestion === item.questionNumber}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${reanalyzingQuestion === item.questionNumber ? 'animate-spin' : ''}`} />
+                    {reanalyzingQuestion === item.questionNumber ? '재분석 중...' : '재분석'}
+                  </button>
                   <span className={`px-2 py-1 rounded-lg text-xs font-medium ${difficultyColors[item.difficulty]}`}>
                     {difficultyLabels[item.difficulty]}
                   </span>
@@ -357,57 +473,104 @@ export default function ReviewPage() {
                     <ChevronRight className="w-5 h-5 text-slate-400" />
                   )}
                 </div>
-              </button>
+              </div>
 
               {expandedQuestions.has(item.questionNumber) && (
                 <div className="px-6 pb-6 border-t border-slate-100 space-y-4 pt-4">
-                  <div className="flex items-center justify-between">
-                    <InfoRow label="출처" value={item.sourceName} />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-500">출처:</span>
+                        <span className="text-sm font-medium text-slate-900">{formatSourceName(item.sourceName, item.sourceNumber)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-500">난이도:</span>
+                        {(['high', 'medium', 'low'] as const).map((d) => (
+                          <button
+                            key={d}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateDifficulty(item.questionNumber, d);
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                              item.difficulty === d
+                                ? difficultyColors[d]
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            {difficultyLabels[d]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-500">난이도:</span>
-                      {(['high', 'medium', 'low'] as const).map((d) => (
+                      <span className="text-sm text-slate-500">연계 유형:</span>
+                      {(['direct', 'indirect', 'external'] as const).map((type) => (
                         <button
-                          key={d}
+                          key={type}
                           onClick={(e) => {
                             e.stopPropagation();
-                            updateDifficulty(item.questionNumber, d);
+                            if (item.sourceType !== type) {
+                              updateSourceType(item.questionNumber, type);
+                            }
                           }}
-                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                            item.difficulty === d
-                              ? difficultyColors[d]
+                          disabled={reanalyzingQuestion === item.questionNumber}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                            item.sourceType === type
+                              ? sourceTypeColors[type]
                               : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                           }`}
                         >
-                          {difficultyLabels[d]}
+                          {sourceTypeLabels[type]}
                         </button>
                       ))}
+                      {reanalyzingQuestion === item.questionNumber && (
+                        <span className="text-xs text-purple-600 flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          재분석 중...
+                        </span>
+                      )}
                     </div>
                   </div>
 
+                  {item.questionText && (
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <p className="text-sm text-slate-500 font-medium mb-2">📝 기출문제</p>
+                      <div className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
+                        {renderTextWithUnderline(item.questionText)}
+                      </div>
+                    </div>
+                  )}
+
                   {item.transformationSummary && (
-                    <div className="p-4 bg-blue-50 rounded-xl">
-                      <p className="text-sm text-blue-600 font-medium mb-1">변형 패턴</p>
+                    <div className="p-4 bg-yellow-50 rounded-xl">
+                      <p className="text-sm text-yellow-600 font-medium mb-1">변형 패턴</p>
                       <p className="text-slate-800">{item.transformationSummary}</p>
                     </div>
                   )}
 
-                  {item.sentenceComparisons.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-slate-500 mb-2">문장 변형</p>
-                      {item.sentenceComparisons.map((sc, i) => (
-                        <div key={i} className="grid md:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl mb-2">
-                          <div className="p-3 bg-white rounded-lg">
-                            <p className="text-xs text-slate-400 mb-1">원문</p>
-                            <p className="text-sm text-slate-700">{sc.original}</p>
+                  {(() => {
+                    const actualChanges = item.sentenceComparisons.filter(
+                      sc => sc.original.trim() !== sc.transformed.trim()
+                    );
+                    return actualChanges.length > 0 ? (
+                      <div>
+                        <p className="text-sm font-medium text-slate-500 mb-2">문장 변형</p>
+                        {actualChanges.map((sc, i) => (
+                          <div key={i} className="grid md:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl mb-2">
+                            <div className="p-3 bg-white rounded-lg">
+                              <p className="text-xs text-slate-400 mb-1">원문</p>
+                              <p className="text-sm text-slate-700">{sc.original}</p>
+                            </div>
+                            <div className="p-3 bg-white rounded-lg">
+                              <p className="text-xs text-slate-400 mb-1">변형</p>
+                              <p className="text-sm text-slate-900 font-medium">{sc.transformed}</p>
+                            </div>
                           </div>
-                          <div className="p-3 bg-white rounded-lg">
-                            <p className="text-xs text-slate-400 mb-1">변형</p>
-                            <p className="text-sm text-slate-900 font-medium">{sc.transformed}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
 
                   {item.vocabularyChanges.length > 0 && (
                     <div>
@@ -418,7 +581,7 @@ export default function ReviewPage() {
                             <span className="font-semibold text-slate-900">{v.original}</span>
                             <span className="text-slate-400">→</span>
                             <span className="font-semibold text-purple-600">{v.transformed}</span>
-                            <span className="text-xs text-amber-600 ml-1">({v.tepsLevel})</span>
+                            {v.tepsLevel > 0 && <span className="text-xs text-amber-600 ml-1">({v.tepsLevel})</span>}
                           </span>
                         ))}
                       </div>
@@ -457,6 +620,22 @@ export default function ReviewPage() {
                     <div className="p-4 bg-green-50 rounded-xl">
                       <p className="text-sm text-green-600 font-medium mb-1">정답 근거</p>
                       <p className="text-slate-800">{item.answerRationale}</p>
+                    </div>
+                  )}
+
+                  {item.wrongAnswerAnalysis && item.wrongAnswerAnalysis.length > 0 && (
+                    <div className="p-4 bg-red-50 rounded-xl">
+                      <p className="text-sm text-red-600 font-medium mb-2">오답 분석</p>
+                      <div className="space-y-2">
+                        {item.wrongAnswerAnalysis.map((wa, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="w-6 h-6 rounded-full bg-red-200 text-red-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                              {wa.choice}
+                            </span>
+                            <p className="text-sm text-slate-700">{wa.reason}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -552,6 +731,70 @@ export default function ReviewPage() {
                   <Send className="w-4 h-4" />
                 )}
                 반려하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPublishModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-6 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">게시 비밀번호 설정</h2>
+            </div>
+            
+            <p className="text-sm text-slate-500 mb-4">
+              학생과 선생님이 리포트에 접근할 때 사용할 비밀번호를 설정해주세요.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">학생용 비밀번호</label>
+                <input
+                  type="password"
+                  value={publishPasswords.student}
+                  onChange={(e) => setPublishPasswords(prev => ({ ...prev, student: e.target.value }))}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 bg-white"
+                  placeholder="학생 공유용"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">편집용 비밀번호</label>
+                <input
+                  type="password"
+                  value={publishPasswords.edit}
+                  onChange={(e) => setPublishPasswords(prev => ({ ...prev, edit: e.target.value }))}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 bg-white"
+                  placeholder="선생님 전용"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowPublishModal(false);
+                  setPublishPasswords({ student: '', edit: '' });
+                }}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handlePublish}
+                disabled={isSubmitting || !publishPasswords.student || !publishPasswords.edit}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                게시하기
               </button>
             </div>
           </div>

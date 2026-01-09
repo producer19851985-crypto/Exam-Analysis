@@ -39,4 +39,17 @@ body {
   header {
     position: static !important;
   }
+
+  /* 인쇄 시 숨겨진 콘텐츠 모두 표시 */
+  .print-expand {
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* 페이지 넘김 방지 */
+  .print-no-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
 }

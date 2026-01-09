@@ -57,7 +57,7 @@ export default function AnalyzePage() {
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([
     { id: 'OCR', label: 'PDF 텍스트 추출', status: 'processing', progress: 0 },
-    { id: '매칭', label: '원문 매칭 (Gemini 3 Pro)', status: 'pending' },
+    { id: '매칭', label: '원문 매칭 (Gemini 2.5 Pro)', status: 'pending' },
     { id: '분석', label: '변형 분석', status: 'pending' },
     { id: '완료', label: '리포트 생성', status: 'pending' },
   ]);
@@ -140,7 +140,7 @@ export default function AnalyzePage() {
             ) : hasError ? (
               <AlertCircle className="w-6 h-6 text-red-600" />
             ) : (
-              <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+              <Loader2 className="w-6 h-6 text-pink-600 animate-spin" />
             )}
             <span className="text-lg font-semibold text-slate-900">
               {isCompleted ? '분석 완료!' : hasError ? '분석 오류' : '분석 진행 중...'}
@@ -159,7 +159,7 @@ export default function AnalyzePage() {
             {!isCompleted && !hasError && (
               <div className="text-right">
                 <p className="text-sm text-slate-500">현재 단계</p>
-                <p className="text-lg font-bold text-blue-600">{analysisStatus?.step || 'OCR'}</p>
+                <p className="text-lg font-bold text-pink-600">{analysisStatus?.step || 'OCR'}</p>
               </div>
             )}
           </div>
@@ -176,7 +176,7 @@ export default function AnalyzePage() {
                     ? 'bg-red-500'
                     : isCompleted
                     ? 'bg-green-500'
-                    : 'bg-gradient-to-r from-blue-500 to-blue-600'
+                    : 'bg-gradient-to-r from-pink-400 to-pink-500'
                 }`}
                 style={{ width: `${overallProgress}%` }}
               />
@@ -204,7 +204,7 @@ export default function AnalyzePage() {
           <div className="text-center">
             <Link
               href={`/report/${reportId}`}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-8 py-4 rounded-full text-lg font-semibold hover:bg-blue-700 transition-colors"
+              className="inline-flex items-center gap-2 bg-pink-600 text-white px-8 py-4 rounded-full text-lg font-semibold hover:bg-pink-700 transition-colors"
             >
               <FileText className="w-5 h-5" />
               리포트 보기
@@ -215,7 +215,7 @@ export default function AnalyzePage() {
         {!isCompleted && !hasError && (
           <div className="bg-slate-100 rounded-xl p-6 mt-8">
             <p className="text-sm text-slate-600 text-center">
-              Gemini 3 Pro가 기출문제와 원문을 분석하고 있습니다.
+              Gemini 2.5 Pro가 기출문제와 원문을 분석하고 있습니다.
               <br />
               약 2-5분 정도 소요됩니다. 창을 닫아도 분석은 계속 진행됩니다.
             </p>
@@ -232,7 +232,7 @@ function StepCard({ step, index }: { step: Step; index: number }) {
       case 'completed':
         return <CheckCircle2 className="w-6 h-6 text-green-500" />;
       case 'processing':
-        return <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />;
+        return <Loader2 className="w-6 h-6 text-pink-600 animate-spin" />;
       case 'error':
         return <AlertCircle className="w-6 h-6 text-red-500" />;
       default:
@@ -244,7 +244,7 @@ function StepCard({ step, index }: { step: Step; index: number }) {
     <div
       className={`rounded-xl border p-5 transition-colors ${
         step.status === 'processing'
-          ? 'border-blue-200 bg-blue-50'
+          ? 'border-pink-200 bg-pink-50'
           : step.status === 'completed'
           ? 'border-green-200 bg-green-50'
           : step.status === 'error'
@@ -264,7 +264,7 @@ function StepCard({ step, index }: { step: Step; index: number }) {
               {index + 1}단계: {step.label}
             </h3>
             {step.status === 'processing' && step.progress !== undefined && (
-              <span className="text-sm font-medium text-blue-600">
+              <span className="text-sm font-medium text-pink-600">
                 {Math.round(step.progress)}%
               </span>
             )}
@@ -272,9 +272,9 @@ function StepCard({ step, index }: { step: Step; index: number }) {
 
           {step.status === 'processing' && step.progress !== undefined && (
             <div className="mt-3">
-              <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+              <div className="h-1.5 bg-pink-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  className="h-full bg-pink-500 rounded-full transition-all duration-300"
                   style={{ width: `${step.progress}%` }}
                 />
               </div>

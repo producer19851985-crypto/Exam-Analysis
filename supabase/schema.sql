@@ -71,6 +71,18 @@ CREATE TABLE summary_reports (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE ocr_cache (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pdf_hash VARCHAR(64) NOT NULL UNIQUE,
+  file_name VARCHAR(255),
+  questions JSONB NOT NULL,
+  sources JSONB,
+  answer_key TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_ocr_cache_hash ON ocr_cache(pdf_hash);
 CREATE INDEX idx_reports_status ON reports(status);
 CREATE INDEX idx_uploaded_files_report ON uploaded_files(report_id);
 CREATE INDEX idx_questions_report ON questions(report_id);
@@ -90,3 +102,6 @@ CREATE POLICY "Public access for uploaded_files" ON uploaded_files FOR ALL USING
 CREATE POLICY "Public access for extracted_texts" ON extracted_texts FOR ALL USING (true);
 CREATE POLICY "Public access for questions" ON questions FOR ALL USING (true);
 CREATE POLICY "Public access for summary_reports" ON summary_reports FOR ALL USING (true);
+
+ALTER TABLE ocr_cache ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public access for ocr_cache" ON ocr_cache FOR ALL USING (true);

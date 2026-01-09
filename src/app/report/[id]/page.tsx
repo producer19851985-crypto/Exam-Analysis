@@ -21,8 +21,29 @@ import {
   Plus,
   Trash2,
   Save,
+  List,
+  Home,
 } from 'lucide-react';
+import Link from 'next/link';
+import { formatSourceName } from '@/lib/utils';
 import { QUESTION_TYPE_LABELS, QuestionType } from '@/types';
+import { OverviewTab } from '@/components/report/OverviewTab';
+import { OverviewData } from '@/types/analyzer';
+
+const renderTextWithUnderline = (text: string) => {
+  const processed = text
+    .replace(/<u>/g, '**')
+    .replace(/<\/u>/g, '**');
+  
+  const parts = processed.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      const content = part.slice(2, -2);
+      return <u key={index} className="underline decoration-2">{content}</u>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+};
 
 interface SentenceComparison {
   originalSentence: string;
@@ -47,10 +68,18 @@ interface GrammarChoice {
   explanation: string;
 }
 
+interface WrongAnswerAnalysis {
+  choice: string;
+  reason: string;
+}
+
 interface AnalysisQuestion {
   questionNumber: number;
+  questionText?: string;
+  sourceText?: string;
   sourceType: 'direct' | 'indirect' | 'external';
   sourceName: string;
+  sourceNumber?: number | null;
   confidence: number;
   questionType: string;
   originalType?: string;
@@ -59,9 +88,11 @@ interface AnalysisQuestion {
   sentenceComparisons?: SentenceComparison[];
   vocabularyChanges: VocabularyChange[];
   grammarChoices?: GrammarChoice[];
+  wrongAnswerAnalysis?: WrongAnswerAnalysis[];
   
   transformationSummary?: string;
   teacherIntent?: string;
+  answerRationale?: string;
   studyRecommendations?: string[];
   
   structureChanges?: string[];
@@ -99,7 +130,7 @@ export default function ReportPage() {
   const [passwordError, setPasswordError] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
   const [isStudentPrintMode, setIsStudentPrintMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'summary' | 'questions' | 'vocabulary'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'questions' | 'vocabulary' | 'compare'>('summary');
   const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set());
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
   
@@ -108,16 +139,17 @@ export default function ReportPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [teacherComments, setTeacherComments] = useState<Record<number, string>>({});
   const [isPublished, setIsPublished] = useState<boolean | null>(null);
+  const [overviewData, setOverviewData] = useState<OverviewData | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         const response = await fetch(`/api/report/${reportId}`);
         const result = await response.json();
-        
+
         if (result.success) {
-          const { metadata, questions, summary } = result.data;
-          
+          const { metadata, questions, summary, overview_data } = result.data;
+
           if (metadata.status === 'published') {
             setIsPublished(true);
           } else {
@@ -126,6 +158,9 @@ export default function ReportPage() {
 
           setReportMetadata(metadata);
           setAnalysisResult({ questions, summary });
+          if (overview_data) {
+            setOverviewData(overview_data);
+          }
           
           const comments: Record<number, string> = {};
           questions.forEach((q: any) => {
@@ -285,6 +320,11 @@ export default function ReportPage() {
   };
 
   const handleStudentPrint = () => {
+    // 인쇄 시 모든 문항 펼치기
+    if (analysisResult) {
+      const allQuestionNumbers = new Set(analysisResult.questions.map(q => q.questionNumber));
+      setExpandedQuestions(allQuestionNumbers);
+    }
     setIsStudentPrintMode(true);
     setTimeout(() => {
       window.print();
@@ -296,7 +336,7 @@ export default function ReportPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-6">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 text-blue-400 animate-spin mx-auto mb-4" />
+          <Loader2 className="w-12 h-12 text-yellow-400 animate-spin mx-auto mb-4" />
           <p className="text-slate-300">리포트를 불러오는 중...</p>
         </div>
       </div>
@@ -332,7 +372,7 @@ export default function ReportPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-6">
         <div className="bg-slate-800/50 backdrop-blur-xl rounded-3xl border border-slate-700 shadow-2xl max-w-md w-full p-8">
           <div className="text-center mb-8">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/25">
+            <div className="w-20 h-20 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-yellow-500/25">
               <Lock className="w-10 h-10 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white">리포트 접근</h1>
@@ -348,13 +388,13 @@ export default function ReportPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="비밀번호 입력"
-                className="w-full px-5 py-4 bg-slate-900/50 border border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder-slate-500"
+                className="w-full px-5 py-4 bg-slate-900/50 border border-slate-600 rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-transparent outline-none text-white placeholder-slate-500"
               />
               {passwordError && <p className="text-red-400 text-sm mt-2">{passwordError}</p>}
             </div>
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-semibold hover:from-blue-500 hover:to-purple-500 transition-all shadow-lg shadow-blue-500/25"
+              className="w-full bg-gradient-to-r from-yellow-300 to-yellow-400 text-white py-4 rounded-xl font-semibold hover:from-pink-400 hover:to-rose-500 transition-all shadow-lg shadow-yellow-500/25"
             >
               확인
             </button>
@@ -370,17 +410,20 @@ export default function ReportPage() {
   const externalPercent = summary.total > 0 ? ((summary.external / summary.total) * 100).toFixed(1) : '0';
   
   const allVocabulary = questions
-    .flatMap(q => q.vocabularyChanges)
+    .flatMap(q => q.vocabularyChanges.map(v => ({ ...v, questionNumber: q.questionNumber })))
     .filter(v => v.tepsLevel >= 830)
     .reduce((acc, v) => {
       const existing = acc.find(item => item.original === v.original);
       if (existing) {
         existing.count++;
+        if (!existing.questionNumbers.includes(v.questionNumber)) {
+          existing.questionNumbers.push(v.questionNumber);
+        }
       } else {
-        acc.push({ ...v, count: 1 });
+        acc.push({ ...v, count: 1, questionNumbers: [v.questionNumber] });
       }
       return acc;
-    }, [] as Array<VocabularyChange & { count: number }>)
+    }, [] as Array<VocabularyChange & { count: number; questionNumbers: number[] }>)
     .sort((a, b) => b.tepsLevel - a.tepsLevel);
 
   const highDifficultyCount = questions.filter(q => q.difficulty === 'high').length;
@@ -392,7 +435,7 @@ export default function ReportPage() {
       <header className={`border-b sticky top-0 z-50 ${isStudentPrintMode ? 'bg-white' : 'bg-white/80 backdrop-blur-xl'}`}>
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-xl flex items-center justify-center">
               <FileText className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -401,65 +444,92 @@ export default function ReportPage() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2 no-print">
-            {copySuccess && (
-              <span className="text-green-600 text-sm flex items-center gap-1 px-3 py-1 bg-green-50 rounded-lg">
-                <CheckCircle2 className="w-4 h-4" />
-                복사됨
-              </span>
-            )}
-            
-            <button
-              onClick={copyShareInfo}
-              className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              title="학생 공유용 링크+비번 복사"
-            >
-              <Share2 className="w-4 h-4" />
-              <span className="hidden sm:inline">공유</span>
-            </button>
-            
-            <button
-              onClick={handleStudentPrint}
-              className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              title="학생용 인쇄 (코멘트 제외)"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">학생용</span>
-            </button>
-            
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">PDF</span>
-            </button>
-            
-            {isEditMode && (
-              <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 text-white">
-                <Edit3 className="w-4 h-4" />
-                <span className="hidden sm:inline">편집 모드</span>
-              </div>
-            )}
-          </div>
+          {(!isAuthenticated || isEditMode) && (
+            <div className="flex items-center gap-2 no-print">
+              {copySuccess && (
+                <span className="text-green-600 text-sm flex items-center gap-1 px-3 py-1 bg-green-50 rounded-lg">
+                  <CheckCircle2 className="w-4 h-4" />
+                  복사됨
+                </span>
+              )}
+
+              <Link
+                href="/saved"
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                title="저장된 분석 목록"
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">목록</span>
+              </Link>
+
+              <Link
+                href="/upload"
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                title="새 분석 시작"
+              >
+                <Home className="w-4 h-4" />
+                <span className="hidden sm:inline">홈</span>
+              </Link>
+
+              <button
+                onClick={copyShareInfo}
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                title="학생 공유용 링크+비번 복사"
+              >
+                <Share2 className="w-4 h-4" />
+                <span className="hidden sm:inline">공유</span>
+              </button>
+
+              <button
+                onClick={handleStudentPrint}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white hover:bg-slate-700 rounded-lg transition-colors"
+                title="인쇄하기"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden sm:inline">인쇄</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (analysisResult) {
+                    const allQuestionNumbers = new Set(analysisResult.questions.map(q => q.questionNumber));
+                    setExpandedQuestions(allQuestionNumbers);
+                  }
+                  setTimeout(() => window.print(), 100);
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">PDF</span>
+              </button>
+
+              {isEditMode && (
+                <div className="flex items-center gap-1 px-3 py-2 rounded-lg bg-yellow-500 text-white">
+                  <Edit3 className="w-4 h-4" />
+                  <span className="hidden sm:inline">편집 모드</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex flex-wrap gap-2 mb-6">
-          {(['summary', 'questions', 'vocabulary'] as const).map((tab) => (
+          {(['summary', 'compare', 'vocabulary', 'questions'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-5 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === tab
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/25'
+                  ? 'bg-gradient-to-r from-yellow-300 to-yellow-400 text-white shadow-lg shadow-yellow-500/25'
                   : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
               }`}
             >
               {tab === 'summary' && '통합 보고서'}
-              {tab === 'questions' && '문항별 분석'}
+              {tab === 'compare' && '원문 매칭'}
               {tab === 'vocabulary' && '어휘 총정리'}
+              {tab === 'questions' && '문항별 분석'}
             </button>
           ))}
         </div>
@@ -475,7 +545,7 @@ export default function ReportPage() {
 
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
               <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-blue-600" />
+                <TrendingUp className="w-5 h-5 text-yellow-600" />
                 난이도 분포
               </h2>
               <div className="grid md:grid-cols-3 gap-4">
@@ -536,38 +606,93 @@ export default function ReportPage() {
         )}
 
         {activeTab === 'vocabulary' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-slate-900">
-                고난도 어휘 ({allVocabulary.length}개)
-              </h2>
-              <div className="flex gap-2 no-print">
-                <button
-                  onClick={copyVocabularyList}
-                  className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
-                >
-                  <Copy className="w-4 h-4" />
-                  복사
-                </button>
-                <button
-                  onClick={exportToCSV}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  엑셀
-                </button>
-              </div>
-            </div>
-            
-            {allVocabulary.length === 0 ? (
-              <p className="text-slate-500 text-center py-8">추출된 고난도 어휘가 없습니다.</p>
+          <div className="space-y-4">
+            {overviewData ? (
+              <OverviewTab data={overviewData} />
             ) : (
-              <div className="space-y-3">
-                {allVocabulary.map((v, i) => (
-                  <VocabCard key={i} vocab={v} />
-                ))}
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+                <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-500">어휘 분석 데이터가 없습니다.</p>
+                <p className="text-sm text-slate-400 mt-2">
+                  analyzer 도구에서 분석을 먼저 진행해주세요.
+                </p>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'compare' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900 mb-2">원문 vs 기출 비교</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                각 문항의 원문(모의고사/교과서)과 기출문제를 나란히 비교합니다. 외부지문은 원문이 없습니다.
+              </p>
+            </div>
+            
+            {questions.map((q) => (
+              <div key={q.questionNumber} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-bold text-slate-900">#{q.questionNumber}</span>
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
+                      q.sourceType === 'direct' ? 'bg-green-100 text-green-700 border-green-200' :
+                      q.sourceType === 'indirect' ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                      'bg-purple-100 text-purple-700 border-purple-200'
+                    }`}>
+                      {q.sourceType === 'direct' ? '직접연계' : q.sourceType === 'indirect' ? '간접연계' : '외부지문'}
+                    </span>
+                    <span className="text-sm text-slate-500">{formatSourceName(q.sourceName, q.sourceNumber)}</span>
+                  </div>
+                </div>
+                
+                <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+                  <div className="p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <BookOpen className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <h3 className="font-semibold text-slate-900">원문</h3>
+                    </div>
+                    {q.sourceType === 'external' ? (
+                      <div className="p-4 bg-slate-50 rounded-xl text-center">
+                        <p className="text-slate-400">외부지문 - 원문 없음</p>
+                      </div>
+                    ) : q.sourceText ? (
+                      <div className="p-4 bg-blue-50 rounded-xl">
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                          {q.sourceText}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-slate-50 rounded-xl text-center">
+                        <p className="text-slate-400">원문 텍스트가 없습니다</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-yellow-600" />
+                      </div>
+                      <h3 className="font-semibold text-slate-900">기출문제</h3>
+                    </div>
+                    {q.questionText ? (
+                      <div className="p-4 bg-yellow-50 rounded-xl">
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                          {renderTextWithUnderline(q.questionText)}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-slate-50 rounded-xl text-center">
+                        <p className="text-slate-400">기출문제 텍스트가 없습니다</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -577,7 +702,7 @@ export default function ReportPage() {
 
 function StatCard({ label, value, subtext, color }: { label: string; value: string; subtext: string; color: string }) {
   const colors: Record<string, string> = {
-    blue: 'from-blue-500 to-blue-600',
+    blue: 'from-pink-400 to-pink-500',
     green: 'from-green-500 to-green-600',
     amber: 'from-amber-500 to-amber-600',
     purple: 'from-purple-500 to-purple-600',
@@ -613,7 +738,7 @@ function DifficultyCard({ label, count, total, color }: { label: string; count: 
 function StrategyItem({ priority, title, description }: { priority: number; title: string; description: string }) {
   return (
     <div className="flex items-start gap-4 p-4 bg-slate-50 rounded-xl">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-300 to-yellow-400 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
         {priority}
       </div>
       <div>
@@ -624,9 +749,9 @@ function StrategyItem({ priority, title, description }: { priority: number; titl
   );
 }
 
-function VocabCard({ vocab }: { vocab: VocabularyChange & { count: number } }) {
+function VocabCard({ vocab }: { vocab: VocabularyChange & { count: number; questionNumbers?: number[] } }) {
   const levelColor = vocab.tepsLevel >= 870 ? 'bg-red-100 text-red-700' : vocab.tepsLevel >= 850 ? 'bg-orange-100 text-orange-700' : 'bg-amber-100 text-amber-700';
-  
+
   return (
     <div className="border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-2">
@@ -643,7 +768,11 @@ function VocabCard({ vocab }: { vocab: VocabularyChange & { count: number } }) {
           <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${levelColor}`}>
             TEPS {vocab.tepsLevel}
           </span>
-          <span className="text-xs text-slate-400">{vocab.count}회</span>
+          {vocab.questionNumbers && vocab.questionNumbers.length > 0 && (
+            <span className="px-2 py-1 rounded-lg text-xs bg-blue-100 text-blue-700">
+              {vocab.questionNumbers.map(n => `#${n}`).join(', ')}
+            </span>
+          )}
         </div>
       </div>
       {(vocab.originalContext || vocab.transformedContext) && (
@@ -789,7 +918,7 @@ function QuestionCard({
               <div className="flex justify-end no-print">
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="flex items-center gap-2 px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
                 >
                   <Edit3 className="w-4 h-4" />
                   분석 수정
@@ -798,7 +927,7 @@ function QuestionCard({
             )}
 
             {isEditing ? (
-              <div className="space-y-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+              <div className="space-y-4 p-4 bg-yellow-50 rounded-xl border border-yellow-200">
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">연계 유형</label>
@@ -850,7 +979,7 @@ function QuestionCard({
                     <label className="block text-sm font-medium text-slate-700">어휘 변형</label>
                     <button
                       onClick={addVocabulary}
-                      className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+                      className="flex items-center gap-1 text-sm text-yellow-600 hover:text-pink-800"
                     >
                       <Plus className="w-4 h-4" />
                       추가
@@ -895,7 +1024,7 @@ function QuestionCard({
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleSaveEdit}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
                   >
                     <Save className="w-4 h-4" />
                     저장
@@ -918,32 +1047,46 @@ function QuestionCard({
               </div>
             ) : (
               <>
-                <InfoRow label="출처" value={question.sourceName} />
+                <InfoRow label="출처" value={formatSourceName(question.sourceName, question.sourceNumber)} />
+
+                {question.questionText && (
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                    <p className="text-sm text-slate-500 font-medium mb-2">📝 기출문제</p>
+                    <div className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
+                      {renderTextWithUnderline(question.questionText)}
+                    </div>
+                  </div>
+                )}
                 
                 {question.transformationSummary && (
-                  <div className="p-4 bg-blue-50 rounded-xl">
-                    <p className="text-sm text-blue-600 font-medium mb-1">변형 패턴</p>
+                  <div className="p-4 bg-yellow-50 rounded-xl">
+                    <p className="text-sm text-yellow-600 font-medium mb-1">변형 패턴</p>
                     <p className="text-slate-800">{question.transformationSummary}</p>
                   </div>
                 )}
 
-                {question.sentenceComparisons && question.sentenceComparisons.length > 0 && (
-                  <div>
-                    <p className="text-sm font-medium text-slate-500 mb-2">문장 변형</p>
-                    {question.sentenceComparisons.map((sc, i) => (
-                      <div key={i} className="grid md:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl mb-2">
-                        <div className="p-3 bg-white rounded-lg">
-                          <p className="text-xs text-slate-400 mb-1">원문</p>
-                          <p className="text-sm text-slate-700">{sc.originalSentence}</p>
+                {(() => {
+                  const actualChanges = (question.sentenceComparisons || []).filter(
+                    sc => sc.originalSentence?.trim() !== sc.transformedSentence?.trim()
+                  );
+                  return actualChanges.length > 0 ? (
+                    <div>
+                      <p className="text-sm font-medium text-slate-500 mb-2">문장 변형</p>
+                      {actualChanges.map((sc, i) => (
+                        <div key={i} className="grid md:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl mb-2">
+                          <div className="p-3 bg-white rounded-lg">
+                            <p className="text-xs text-slate-400 mb-1">원문</p>
+                            <p className="text-sm text-slate-700">{sc.originalSentence}</p>
+                          </div>
+                          <div className="p-3 bg-white rounded-lg">
+                            <p className="text-xs text-slate-400 mb-1">변형</p>
+                            <p className="text-sm text-slate-900 font-medium">{sc.transformedSentence}</p>
+                          </div>
                         </div>
-                        <div className="p-3 bg-white rounded-lg">
-                          <p className="text-xs text-slate-400 mb-1">변형</p>
-                          <p className="text-sm text-slate-900 font-medium">{sc.transformedSentence}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
 
                 {question.grammarChoices && question.grammarChoices.length > 0 && (
                   <div>
@@ -975,7 +1118,7 @@ function QuestionCard({
                           <span className="font-semibold text-slate-900">{v.original}</span>
                           <span className="text-slate-400">→</span>
                           <span className="font-semibold text-purple-600">{v.transformed}</span>
-                          <span className="text-xs text-amber-600 ml-1">({v.tepsLevel})</span>
+                          {v.tepsLevel > 0 && <span className="text-xs text-amber-600 ml-1">({v.tepsLevel})</span>}
                         </span>
                       ))}
                     </div>
@@ -986,6 +1129,29 @@ function QuestionCard({
                   <div className="p-4 bg-indigo-50 rounded-xl">
                     <p className="text-sm text-indigo-600 font-medium mb-1">출제 의도</p>
                     <p className="text-slate-800">{question.teacherIntent}</p>
+                  </div>
+                )}
+
+                {question.answerRationale && (
+                  <div className="p-4 bg-green-50 rounded-xl">
+                    <p className="text-sm text-green-600 font-medium mb-1">정답 근거</p>
+                    <p className="text-slate-800">{question.answerRationale}</p>
+                  </div>
+                )}
+
+                {question.wrongAnswerAnalysis && question.wrongAnswerAnalysis.length > 0 && (
+                  <div className="p-4 bg-red-50 rounded-xl">
+                    <p className="text-sm text-red-600 font-medium mb-2">오답 분석</p>
+                    <div className="space-y-2">
+                      {question.wrongAnswerAnalysis.map((wa, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="w-6 h-6 rounded-full bg-red-200 text-red-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                            {wa.choice}
+                          </span>
+                          <p className="text-sm text-slate-700">{wa.reason}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1006,8 +1172,8 @@ function QuestionCard({
             )}
 
             {!isStudentPrintMode && !isEditMode && comment && (
-              <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                <p className="text-sm text-blue-600 font-medium mb-1">선생님 코멘트</p>
+              <div className="p-4 bg-yellow-50 rounded-xl border border-yellow-200">
+                <p className="text-sm text-yellow-600 font-medium mb-1">선생님 코멘트</p>
                 <p className="text-slate-800 whitespace-pre-wrap">{comment}</p>
               </div>
             )}
@@ -1031,7 +1197,7 @@ function QuestionCard({
                   )}
                   <button
                     onClick={handleSaveComment}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                    className="px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm font-medium hover:bg-yellow-600"
                   >
                     저장
                   </button>

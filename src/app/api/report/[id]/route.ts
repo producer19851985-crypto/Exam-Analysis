@@ -28,8 +28,38 @@ export async function GET(
     .eq('report_id', id)
     .order('question_number');
 
+  // analyzer_reports에서 overview_data 가져오기 (school_name + exam_name으로 매칭)
+  let analyzerReport = null;
+
+  // 먼저 같은 ID로 시도
+  const { data: reportById } = await supabase
+    .from('analyzer_reports')
+    .select('overview_data')
+    .eq('id', id)
+    .single();
+
+  if (reportById) {
+    analyzerReport = reportById;
+  } else {
+    // school_name + exam_name으로 매칭 시도
+    const { data: reportByName } = await supabase
+      .from('analyzer_reports')
+      .select('overview_data')
+      .eq('school_name', report.school_name)
+      .eq('exam_name', report.exam_name)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (reportByName) {
+      analyzerReport = reportByName;
+    }
+  }
+
   const formattedQuestions = (questions || []).map(q => ({
     questionNumber: q.question_number,
+    questionText: q.question_text || '',
+    sourceText: q.source_text || '',
     sourceType: q.source_type || 'external',
     sourceName: q.analysis?.source_name || '외부지문',
     confidence: q.source_confidence || 100,
@@ -43,8 +73,10 @@ export async function GET(
     })),
     vocabularyChanges: q.analysis?.vocabulary_changes || [],
     grammarChoices: q.analysis?.grammar_points || [],
+    wrongAnswerAnalysis: q.analysis?.wrong_answer_analysis || [],
     transformationSummary: q.analysis?.transformation_summary || '',
     teacherIntent: q.analysis?.teacher_intent || '',
+    answerRationale: q.analysis?.answer_rationale || '',
     studyRecommendations: q.analysis?.study_tips || [],
     teacherComment: q.teacher_comment || '',
   }));
@@ -72,6 +104,7 @@ export async function GET(
       },
       questions: formattedQuestions,
       summary,
+      overview_data: analyzerReport?.overview_data || null,
     },
   });
 }
